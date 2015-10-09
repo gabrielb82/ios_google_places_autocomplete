@@ -8,23 +8,7 @@
 
 import UIKit
 
-public struct LocationBias {
-  public let latitude: Double
-  public let longitude: Double
-  public let radius: Int
-  
-  public init(latitude: Double = 0, longitude: Double = 0, radius: Int = 20000000) {
-    self.latitude = latitude
-    self.longitude = longitude
-    self.radius = radius
-  }
-  
-  public var location: String {
-    return "\(latitude),\(longitude)"
-  }
-}
-
-public enum PlaceType: Printable {
+public enum PlaceType: CustomStringConvertible {
   case All
   case Geocode
   case Address
@@ -48,6 +32,7 @@ public class Place: NSObject {
   public let id: String
   public let desc: String
   public var apiKey: String?
+    public var cidade: String?
 
   override public var description: String {
     get { return desc }
@@ -79,7 +64,7 @@ public class Place: NSObject {
   }
 }
 
-public class PlaceDetails: Printable {
+public class PlaceDetails: CustomStringConvertible {
   public let name: String
   public let latitude: Double
   public let longitude: Double
@@ -104,7 +89,7 @@ public class PlaceDetails: Printable {
 @objc public protocol GooglePlacesAutocompleteDelegate {
   optional func placesFound(places: [Place])
   optional func placeSelected(place: Place)
-  optional func placeViewClosed()
+  optional func placeViewClosed(place: Place)
 }
 
 // MARK: - GooglePlacesAutocomplete
@@ -121,11 +106,6 @@ public class GooglePlacesAutocomplete: UINavigationController {
     get { return gpaViewController.delegate }
     set { gpaViewController.delegate = newValue }
   }
-  
-  public var locationBias: LocationBias? {
-    get { return gpaViewController.locationBias }
-    set { gpaViewController.locationBias = newValue }
-  }
 
   public convenience init(apiKey: String, placeType: PlaceType = .All) {
     let gpaViewController = GooglePlacesAutocompleteContainer(
@@ -140,11 +120,19 @@ public class GooglePlacesAutocomplete: UINavigationController {
     closeButton.style = UIBarButtonItemStyle.Done
 
     gpaViewController.navigationItem.leftBarButtonItem = closeButton
-    gpaViewController.navigationItem.title = "Enter Address"
+    if placeType.description == "address" {
+        gpaViewController.navigationItem.title = "Endereço"
+    }
+    else {
+        gpaViewController.navigationItem.title = "Cidade"
+    }
+    gpaViewController.navigationController?.navigationBar.barTintColor = UIColor.whiteColor()
+    //gpaViewController.navigationController?.setNavigationBarHidden(true, animated: true)
   }
 
   func close() {
-    placeDelegate?.placeViewClosed?()
+    //placeDelegate?.placeViewClosed?(Place())
+    dismissViewControllerAnimated(true, completion: nil)
   }
 
   public func reset() {
@@ -158,12 +146,15 @@ public class GooglePlacesAutocompleteContainer: UIViewController {
   @IBOutlet public weak var searchBar: UISearchBar!
   @IBOutlet weak var tableView: UITableView!
   @IBOutlet weak var topConstraint: NSLayoutConstraint!
+    @IBOutlet weak var container: UIView!
+    
+    var originalController : GooglePlacesAutocompleteContainer?
 
   var delegate: GooglePlacesAutocompleteDelegate?
   var apiKey: String?
   var places = [Place]()
   var placeType: PlaceType = .All
-  var locationBias: LocationBias?
+    var cidade: String?
 
   convenience init(apiKey: String, placeType: PlaceType = .All) {
     let bundle = NSBundle(forClass: GooglePlacesAutocompleteContainer.self)
@@ -183,6 +174,39 @@ public class GooglePlacesAutocompleteContainer: UIViewController {
 
   override public func viewDidLoad() {
     super.viewDidLoad()
+    
+    container.layer.cornerRadius = 6.0
+    container.clipsToBounds = true
+    
+    let labelTitle = UILabel(frame: CGRectZero)
+    labelTitle.textAlignment = NSTextAlignment.Center
+    labelTitle.textColor = UIColor.whiteColor()
+    
+    if placeType.description == "address" {
+        labelTitle.text = "Endereço"
+    }
+    else {
+        labelTitle.text = "Cidade"
+    }
+    
+    var completedNavString = NSMutableAttributedString()
+    
+    completedNavString = NSMutableAttributedString(string: labelTitle.text!, attributes: [NSFontAttributeName:UIFont(name: "HelveticaNeue-Thin", size: 25.0)!])
+    
+    let navLabel = UILabel()
+    navLabel.attributedText = completedNavString
+    navLabel.sizeToFit()
+    navLabel.textColor = UIColor.whiteColor()
+    
+    
+    self.navigationItem.titleView = navLabel
+    
+    self.tableView.separatorInset = UIEdgeInsetsZero
+    self.tableView.layoutMargins = UIEdgeInsetsZero;
+    
+    let footer : UIView = UIView()
+    footer.frame = CGRectZero
+    self.tableView.tableFooterView = footer
 
     NSNotificationCenter.defaultCenter().addObserver(self, selector: "keyboardWasShown:", name: UIKeyboardDidShowNotification, object: nil)
     NSNotificationCenter.defaultCenter().addObserver(self, selector: "keyboardWillBeHidden:", name: UIKeyboardWillHideNotification, object: nil)
@@ -190,11 +214,15 @@ public class GooglePlacesAutocompleteContainer: UIViewController {
     searchBar.becomeFirstResponder()
     tableView.registerClass(UITableViewCell.self, forCellReuseIdentifier: "Cell")
   }
+    
+    @IBAction func close() {
+        super.dismissViewControllerAnimated(true, completion: nil)
+    }
 
   func keyboardWasShown(notification: NSNotification) {
     if isViewLoaded() && view.window != nil {
       let info: Dictionary = notification.userInfo!
-      let keyboardSize: CGSize = (info[UIKeyboardFrameBeginUserInfoKey]?.CGRectValue().size)!
+      let keyboardSize: CGSize = (info[UIKeyboardFrameBeginUserInfoKey]?.CGRectValue.size)!
       let contentInsets = UIEdgeInsetsMake(0.0, 0.0, keyboardSize.height, 0.0)
 
       tableView.contentInset = contentInsets;
@@ -217,10 +245,14 @@ extension GooglePlacesAutocompleteContainer: UITableViewDataSource, UITableViewD
   }
 
   public func tableView(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath) -> UITableViewCell {
-    let cell = tableView.dequeueReusableCellWithIdentifier("Cell", forIndexPath: indexPath) as! UITableViewCell
+    let cell = tableView.dequeueReusableCellWithIdentifier("Cell", forIndexPath: indexPath) as UITableViewCell
 
     // Get the corresponding candy from our candies array
     let place = self.places[indexPath.row]
+    
+    cell.layoutMargins = UIEdgeInsetsZero
+    cell.separatorInset = UIEdgeInsetsZero
+    cell.backgroundColor = UIColor(red: 230/255, green: 230/255, blue: 230/255, alpha: 1)
 
     // Configure the cell
     cell.textLabel!.text = place.description
@@ -230,7 +262,26 @@ extension GooglePlacesAutocompleteContainer: UITableViewDataSource, UITableViewD
   }
 
   public func tableView(tableView: UITableView, didSelectRowAtIndexPath indexPath: NSIndexPath) {
-    delegate?.placeSelected?(self.places[indexPath.row])
+    
+    
+    if (cidade == nil) {
+        delegate?.placeSelected?(self.places[indexPath.row])
+        let gpaViewController2 = GooglePlacesAutocompleteContainer(
+            apiKey: apiKey!,
+            placeType: .Address
+        )
+        
+        let lugar = self.places[indexPath.row] as Place
+        
+        gpaViewController2.cidade = lugar.desc
+        gpaViewController2.originalController = self
+        
+        self.navigationController?.pushViewController(gpaViewController2, animated: true)
+    }
+    else {
+        self.navigationController?.popToRootViewControllerAnimated(true);
+        originalController!.delegate?.placeViewClosed?(self.places[indexPath.row])
+    }
   }
 }
 
@@ -241,7 +292,7 @@ extension GooglePlacesAutocompleteContainer: UISearchBarDelegate {
       self.places = []
       tableView.hidden = true
     } else {
-      getPlaces(searchText)
+      getPlaces(searchText.stringByReplacingOccurrencesOfString(" ", withString: "%20"))
     }
   }
 
@@ -250,21 +301,21 @@ extension GooglePlacesAutocompleteContainer: UISearchBarDelegate {
 
     :param: searchString The search query
   */
-  private func getPlaces(searchString: String) {
-    var params = [
-      "input": searchString,
-      "types": placeType.description,
-      "key": apiKey ?? ""
-    ]
+  private func getPlaces(var searchString: String) {
     
-    if let bias = locationBias {
-      params["location"] = bias.location
-      params["radius"] = bias.radius.description
+    if self.cidade != nil {
+        self.cidade = self.cidade!.stringByReplacingOccurrencesOfString(" ", withString: "%20")
+        searchString = "\(self.cidade!), \(searchString)"
     }
-    
+
     GooglePlacesRequestHelpers.doRequest(
       "https://maps.googleapis.com/maps/api/place/autocomplete/json",
-      params: params
+      params: [
+        "input": searchString.stringByReplacingOccurrencesOfString(" ", withString: "%20"),
+        "types": placeType.description,
+        "language": "pt_BR", // Choose Your Language ***
+        "key": apiKey! ?? ""
+      ]
     ) { json in
       if let predictions = json["predictions"] as? Array<[String: AnyObject]> {
         self.places = predictions.map { (prediction: [String: AnyObject]) -> Place in
@@ -310,26 +361,38 @@ class GooglePlacesRequestHelpers {
   */
   private class func query(parameters: [String: AnyObject]) -> String {
     var components: [(String, String)] = []
-    for key in sorted(Array(parameters.keys), <) {
+    var stringParametros = ""
+    //for key in sort(Array(parameters.keys), <) {
+    for key in Array(parameters.keys).sort(<) {
       let value: AnyObject! = parameters[key]
       components += [(escape(key), escape("\(value)"))]
+        stringParametros += "&\(key)=\(value)"
     }
+    
+    return stringParametros
+    
+    //return components.map{"\($0)=\($1)"}.joinWithSeparator("&")
+    
+    
 
-    return join("&", components.map{"\($0)=\($1)"} as [String])
+    //return join("&", components.map{"\($0)=\($1)"} as [String])
   }
 
   private class func escape(string: String) -> String {
-    let legalURLCharactersToBeEscaped: CFStringRef = ":/?&=;+!@#$()',*"
-    return CFURLCreateStringByAddingPercentEscapes(nil, string, nil, legalURLCharactersToBeEscaped, CFStringBuiltInEncodings.UTF8.rawValue) as String
+    //let legalURLCharactersToBeEscaped: CFStringRef = ":/?&=;+!@#$()',*"
+    //return CFURLCreateStringByAddingPercentEscapes(nil,  string, nil, legalURLCharactersToBeEscaped, CFStringBuiltInEncodings.UTF8.rawValue) as String
+    
+    
+    return String().stringByAddingPercentEncodingWithAllowedCharacters(NSCharacterSet.URLQueryAllowedCharacterSet())!
   }
 
   private class func doRequest(url: String, params: [String: String], success: NSDictionary -> ()) {
-    var request = NSMutableURLRequest(
+    let request = NSMutableURLRequest(
       URL: NSURL(string: "\(url)?\(query(params))")!
     )
 
-    var session = NSURLSession.sharedSession()
-    var task = session.dataTaskWithRequest(request) { data, response, error in
+    let session = NSURLSession.sharedSession()
+    let task = session.dataTaskWithRequest(request) { data, response, error in
       self.handleResponse(data, response: response as? NSHTTPURLResponse, error: error, success: success)
     }
 
@@ -338,35 +401,34 @@ class GooglePlacesRequestHelpers {
 
   private class func handleResponse(data: NSData!, response: NSHTTPURLResponse!, error: NSError!, success: NSDictionary -> ()) {
     if let error = error {
-      println("GooglePlaces Error: \(error.localizedDescription)")
+      print("GooglePlaces Error: \(error.localizedDescription)")
       return
     }
 
     if response == nil {
-      println("GooglePlaces Error: No response from API")
+      print("GooglePlaces Error: No response from API")
       return
     }
 
     if response.statusCode != 200 {
-      println("GooglePlaces Error: Invalid status code \(response.statusCode) from API")
+      print("GooglePlaces Error: Invalid status code \(response.statusCode) from API")
       return
     }
 
-    var serializationError: NSError?
-    var json: NSDictionary = NSJSONSerialization.JSONObjectWithData(
+    //let serializationError: NSError?
+    let json: NSDictionary = try! NSJSONSerialization.JSONObjectWithData(
       data,
-      options: NSJSONReadingOptions.MutableContainers,
-      error: &serializationError
+      options: NSJSONReadingOptions.MutableContainers
       ) as! NSDictionary
 
-    if let error = serializationError {
-      println("GooglePlaces Error: \(error.localizedDescription)")
-      return
-    }
+//    if let error = serializationError {
+//      print("GooglePlaces Error: \(error.localizedDescription)")
+//      return
+//    }
 
     if let status = json["status"] as? String {
       if status != "OK" {
-        println("GooglePlaces API Error: \(status)")
+        print("GooglePlaces API Error: \(status)")
         return
       }
     }
